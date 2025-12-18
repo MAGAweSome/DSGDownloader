@@ -59,6 +59,41 @@ def get_user_selection():
       - full_dsg_langs: set of languages for Full DSG (if selected)
       - se_dsg_langs: set of languages for Special Edition DSG (if selected)
     """
+    # First ask about Schedules selections (districts, NACC, youth, seniors)
+    schedule_options = [
+        "District Serving Schedules",
+        "NACC Calendars",
+        "Youth Schedules",
+        "Seniors Schedules",
+    ]
+
+    schedules_chosen = prompt_multichoice("Which schedule groups would you like to include?", schedule_options)
+
+    # For each chosen schedule group, ask follow-ups
+    schedules_sub = {}
+    if 'district serving schedules' in schedules_chosen:
+        districts = [
+            'British Columbia', 'Alberta', 'Saskatchewan', 'Manitoba', 'Northern Ontario',
+            'Kitchener', 'Hamilton', 'Toronto', 'Eastern Canada'
+        ]
+        sel = prompt_multichoice("Which district serving schedules? (multiple OK)", districts)
+        schedules_sub['District Serving Schedules'] = sel
+
+    if 'nacc calendars' in schedules_chosen:
+        nacc_opts = ['National', 'Districts']
+        sel = prompt_multichoice("Which NACC Calendars?", nacc_opts)
+        schedules_sub['NACC Calendars'] = sel
+
+    if 'youth schedules' in schedules_chosen:
+        youth_opts = ['Kitchener District', 'Hamilton District']
+        sel = prompt_multichoice("Which Youth schedules?", youth_opts)
+        schedules_sub['Youth Schedules'] = sel
+
+    if 'seniors schedules' in schedules_chosen:
+        seniors_opts = ['Tri-District', 'Margaret Ave']
+        sel = prompt_multichoice("Which Seniors schedules?", seniors_opts)
+        schedules_sub['Seniors Schedules'] = sel
+
     options = [
         "English",
         "French",
@@ -106,6 +141,10 @@ def get_user_selection():
         'bible_references_langs': bible_references_langs,
     }
 
+    # include schedules choices
+    sel_display['schedules_chosen'] = schedules_chosen
+    sel_display['schedules_sub'] = schedules_sub
+
     # print summary
     print("\nUser has selected:")
     if selections:
@@ -123,5 +162,13 @@ def get_user_selection():
         print("Foreword languages:", ", ".join(sorted(foreword_langs)) if foreword_langs else "(none)")
     if "bible references" in selections:
         print("Bible References languages:", ", ".join(sorted(bible_references_langs)) if bible_references_langs else "(none)")
+
+    if schedules_chosen:
+        print("Schedule groups selected:")
+        for s in sorted(schedules_chosen):
+            print(f"- {s}")
+            subs = schedules_sub.get(s.title(), schedules_sub.get(s, set()))
+            if subs:
+                print("  choices:", ", ".join(sorted(subs)))
 
     return sel_display

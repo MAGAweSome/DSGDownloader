@@ -14,6 +14,11 @@ def get_button_text(driver, selector, selector_type="css", timeout=10):
     text = el.text.strip()
     if text:
         return text
+        import urllib.parse
+
+        raw_href = href or ''
+        # decode percent-encoding to help detection (e.g., '%20' -> ' ')
+        h_decoded = urllib.parse.unquote(raw_href)
     tag = el.tag_name.lower()
     if tag in ("input", "button"):
         val = el.get_attribute("value")
@@ -33,7 +38,7 @@ def click_element(driver, selector, selector_type="css", timeout=10):
         el.click()
         return True
     except Exception:
-        # Fallback to JS click
+        date_match = re.search(r'(20\d{2}-\d{2}-\d{2})', raw_href)
         driver.execute_script("arguments[0].click();", el)
         return True
 
@@ -273,6 +278,51 @@ def ensure_subfolders_in_months(base_dir, month_year_pairs, subfolders):
     return created, existing
 
 
+def extract_schedule_sections(driver, timeout=8):
+    """Extract schedule page sections (h3 headings) and their links.
+
+    Returns list of (section_title, [(link_text, href), ...]).
+    It walks each <table> on the page and groups anchors under the most
+    recent <h3> encountered in table rows.
+    """
+    from selenium.webdriver.common.by import By
+    sections = []
+    try:
+        tables = driver.find_elements(By.XPATH, '//table')
+    except Exception:
+        return []
+
+    for table in tables:
+        try:
+            rows = table.find_elements(By.XPATH, './/tr')
+        except Exception:
+            continue
+        current = None
+        for r in rows:
+            try:
+                h3s = r.find_elements(By.XPATH, './/h3')
+                if h3s:
+                    current = h3s[0].text.strip()
+                    sections.append((current, []))
+                    continue
+                anchors = r.find_elements(By.XPATH, './/a')
+                if anchors and current is not None:
+                    # append all anchors to the latest section
+                    for a in anchors:
+                        try:
+                            t = a.text.strip()
+                            h = a.get_attribute('href') or ''
+                            if t or h:
+                                sections[-1][1].append((t, h))
+                        except Exception:
+                            continue
+            except Exception:
+                continue
+    # filter out empty sections
+    filtered = [(s, links) for s, links in sections if links]
+    return filtered
+
+
 def filter_accordion_items_by_selection(items, user_choices):
     """Filter accordion items according to the `user_choices` dict from `src.ui.get_user_selection()`.
 
@@ -351,6 +401,8 @@ def filter_accordion_items_by_selection(items, user_choices):
             or ('/document%20library' in h and 'se' in h)
         )
         flags['foreword'] = 'foreword' in h or 'foreword' in fname
+        # detect serving schedules / schedule PDFs
+        flags['serving'] = 'serving schedules' in h or '/serving schedules/' in h or 'serving schedule' in h or 'serving schedule' in fname or 'serving schedules' in fname or 'serving' in h
         return flags
 
     def link_matches(href):
@@ -483,149 +535,240 @@ def filter_accordion_items_by_selection(items, user_choices):
 
 
 def map_link_to_destination(href, link_text, header_text, base_dir):
-    """Given a link href and context, return (destination_folder, new_filename).
+    """Generate destination folder and filename for a link.
 
-    - Attempts to extract a YYYY-MM-DD date from the href or header_text.
-    - Chooses a subfolder based on link type (audio, transcript, full dsg, etc.).
-    - Builds a human-friendly filename preserving the original extension.
+    Returns (dest_folder, filename_with_ext).
     """
     import os
     import re
+    import urllib.parse
     from datetime import datetime
 
-    h = (href or '').lower()
-    fname = os.path.basename(href or '')
-    # detect extension
+    raw = href or ''
+    decoded = urllib.parse.unquote(raw)
+    h = decoded.lower()
+    fname = os.path.basename(decoded)
     ext = os.path.splitext(fname)[1] or ''
 
-    # basic flags detection (small subset of detect_flags)
+    # detect simple flags
     flags = {
-        'audio': 'audio' in h or 'audio%20' in h or '-audio-' in fname,
-        'transcript': 'transcript' in h,
-        'bible_references': ('bible' in h and 'reference' in h) or 'bible-references' in fname,
-        'bible_reading': 'bible-reading' in h or 'bible%20reading' in h,
-        'full_dsg': ('full' in h and 'dsg' in h) or 'full%20dsg' in h,
-        'se_dsg': 'se%20dsg' in h or 'se-dsg' in h or '/se%20' in h,
-        'foreword': 'foreword' in h or 'foreword' in fname,
-        'children': 'children' in h or 'child' in fname,
-        'youth': 'youth' in h or 'youth' in fname or '-youth-' in fname,
+        'serving': 'serving' in h and 'schedule' in h,
+        'youth': 'youth' in h or 'youth' in fname.lower() or ('youth' in (header_text or '').lower()),
+        'children': 'children' in h or 'child' in fname.lower() or ('children' in (header_text or '').lower()),
+        'senior': 'senior' in h or 'seniors' in h or 'senior' in fname.lower() or 'seniors' in fname.lower() or ('senior' in (header_text or '').lower()),
+        'nacc': 'nacc' in (header_text or '').lower() or 'nacc' in h,
     }
 
-    # try to extract ISO date from filename or href: look for 2025-12-21 patterns
-    date_match = re.search(r'(20\d{2}-\d{2}-\d{2})', href)
-    date_str = None
+    # detect DSG-related flags
+    flags['dsg'] = ('divine service prep' in h) or ('dsg' in fname.lower()) or ('divine' in h) or ('divine' in (header_text or '').lower())
+    flags['full_dsg'] = 'full' in h and 'dsg' in h or 'full dsg' in h or 'full-dsg' in fname.lower()
+    flags['se_dsg'] = 'special edition' in h or 'se dsg' in h or 'se-dsg' in fname.lower()
+    flags['foreword'] = 'foreword' in h or 'foreword' in fname.lower() or 'foreword' in (header_text or '').lower() or 'forward' in (header_text or '').lower()
+    flags['audio'] = 'audio' in h or 'audio' in fname.lower()
+    flags['transcript'] = 'transcript' in h or 'transcript' in fname.lower()
+    flags['bibleref'] = ('bible' in h and 'reference' in h) or 'bible-references' in fname.lower() or 'bible references' in h
+
+    # try ISO date in raw href
     date_obj = None
-    if date_match:
-        date_str = date_match.group(1)
+    m_iso = re.search(r'(20\d{2}-\d{2}-\d{2})', raw)
+    if m_iso:
         try:
-            date_obj = datetime.strptime(date_str, '%Y-%m-%d')
+            date_obj = datetime.strptime(m_iso.group(1), '%Y-%m-%d')
         except Exception:
             date_obj = None
 
-    # fallback: try to find day and month in header like 'Sunday, December 21, 2025'
-    if date_obj is None and header_text:
-        m = re.search(r"(20\d{2})", header_text)
-        # try to parse full date from header using known formats
-        try:
-            # remove long dash separators
-            cleaned = header_text.replace('—', '-').replace('\u2013', '-')
-            # attempt to find Month Day, Year
-            m2 = re.search(r'([A-Za-z]+)\s+(\d{1,2}),\s*(20\d{2})', cleaned)
-            if m2:
-                month_name = m2.group(1)
-                day = int(m2.group(2))
-                year = int(m2.group(3))
-                date_obj = datetime.strptime(f"{month_name} {day} {year}", '%B %d %Y')
-        except Exception:
-            date_obj = None
-
-    # determine subfolder
-    sub = 'DSG'
-    if flags['full_dsg']:
-        sub = 'Full DSGs'
-    elif flags['se_dsg']:
-        sub = 'Special DSG'
-    elif flags['audio']:
-        sub = 'Audio'
-    elif flags['transcript']:
-        sub = 'Transcripts'
-    elif flags['bible_reading']:
-        sub = 'Bible Reading'
-    elif flags['bible_references']:
-        sub = 'Bible References'
-    elif flags['foreword']:
-        sub = 'Foreword'
-    elif flags['youth']:
-        sub = 'Youth'
-    elif flags['children']:
-        sub = 'Childrens Service'
-
-    # year/month path
     year = None
     month = None
     if date_obj:
-        year = f"{date_obj.year}"
+        year = str(date_obj.year)
         month = date_obj.strftime('%B')
     else:
-        # try to extract year/month from href
-        m = re.search(r'/(january|february|march|april|may|june|july|august|september|october|november|december)(?:%20)?(20\d{2})', h)
-        if m:
-            month = m.group(1).title()
-            year = m.group(2)
+        # try to find Month Year in decoded path (e.g., 'January 2026')
+        m_my = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)[\s%20_-]+(20\d{2})', h)
+        if m_my:
+            month = m_my.group(1).title()
+            year = m_my.group(2)
         else:
-            my = re.search(r'(20\d{2})', href)
-            if my:
-                year = my.group(1)
+            m_year = re.search(r'(20\d{2})', raw)
+            if m_year:
+                year = m_year.group(1)
 
-    # build destination path
-    dest_folder = base_dir
-    if year:
-        dest_folder = os.path.join(dest_folder, year)
-    if month:
-        dest_folder = os.path.join(dest_folder, month)
-    if sub:
-        dest_folder = os.path.join(dest_folder, sub)
+        # If month/year still not found, try parsing from the visible link text or header_text
+        if not month or not year:
+            combined_search = ' '.join([decoded, link_text or '', header_text or '']).lower()
+            m_comb = re.search(r'(january|february|march|april|may|june|july|august|september|october|november|december)[\s\-_,]+(20\d{2})', combined_search)
+            if m_comb:
+                month = m_comb.group(1).title()
+                year = m_comb.group(2)
+            else:
+                # look for numeric year-month patterns like 2025-12 or 2025_12 or 2025.12
+                m_num = re.search(r'(20\d{2})[-_\.](0[1-9]|1[0-2])', combined_search)
+                if not m_num:
+                    # also try patterns in filename/decoded path
+                    m_num = re.search(r'(20\d{2})[-_\.](0[1-9]|1[0-2])', decoded)
+                if m_num:
+                    y = m_num.group(1)
+                    mm = m_num.group(2)
+                    month_map = {
+                        '01': 'January', '02': 'February', '03': 'March', '04': 'April', '05': 'May', '06': 'June',
+                        '07': 'July', '08': 'August', '09': 'September', '10': 'October', '11': 'November', '12': 'December'
+                    }
+                    year = y
+                    month = month_map.get(mm, None)
 
-    # create a human-friendly filename
-    if date_obj:
-        # e.g., 'Sunday December 21 2025 English DSG.pdf' - try to include link_text language if present
-        weekday = date_obj.strftime('%A')
-        month_day = date_obj.strftime('%B %d, %Y')
-        # try to detect language code in href
-        lang = ''
-        if re.search(r'(?:(?:-|_|\.))(en|fr|de|it|pt|ru|es)(?:\.|_|/|-|$)', href):
-            lang = re.search(r'(?:(?:-|_|\.))(en|fr|de|it|pt|ru|es)(?:\.|_|/|-|$)', href).group(1)
-            lang_map = {'en': 'English', 'fr': 'French', 'de': 'German', 'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'es': 'Spanish'}
-            lang = lang_map.get(lang, lang.upper())
+    # choose subfolder — preference order: DSG-related categories, then schedules
+    sub = 'DSG'
+    if flags.get('dsg'):
+        # dsg subcategories
+        if flags.get('foreword'):
+            sub = 'Forward'
+        elif flags.get('youth'):
+            sub = 'Youth'
+        elif flags.get('children'):
+            sub = 'Childrens Service'
+        elif flags.get('full_dsg'):
+            sub = 'Full DSGs'
+        elif flags.get('se_dsg'):
+            sub = 'Special DSG'
+        elif flags.get('bibleref'):
+            sub = 'Bible References'
+        elif flags.get('audio'):
+            sub = 'Audio'
+        elif flags.get('transcript'):
+            sub = 'Transcripts'
         else:
-            # check for literal language names in href
-            for name in ('english', 'french', 'german', 'italian', 'portuguese', 'russian', 'spanish'):
-                if name in h:
-                    lang = name.title()
-                    break
-
-        # base label from subfolder
-        label = sub
-        # if sub is 'Full DSGs' use 'Full DSG'
-        if sub == 'Full DSGs':
-            label = 'Full DSG'
-        # if transcript make label 'DSG Transcript' etc.
-        if sub == 'Transcripts':
-            label = 'DSG Transcript'
-
-        parts = [weekday, month_day]
-        if lang:
-            parts.append(lang)
-        parts.append(label)
-        new_name = ' '.join(parts) + ext
+            sub = 'DSG'
     else:
-        # fallback: use original filename
-        new_name = fname or (link_text or 'download')
+        # not DSG -> schedules area
+        # prefer Youth when 'youth' appears in name/href, then serving schedules, then seniors, then NACC
+        if flags.get('youth'):
+            sub = 'Youth'
+        elif flags.get('serving'):
+            sub = 'Schedules'
+        elif flags.get('senior'):
+            sub = 'Seniors'
+        elif flags.get('nacc'):
+            sub = 'NACC Calendars'
 
-    # normalize filename (simple replace of slashes)
-    new_name = re.sub(r'[\\/]+', '-', new_name)
+    # build dest folder
+    dest = base_dir
+    if year:
+        dest = os.path.join(dest, year)
+    if month:
+        dest = os.path.join(dest, month)
+    if sub:
+        dest = os.path.join(dest, sub)
 
-    return dest_folder, new_name
+    # build filename according to requested conventions
+    def clean_loc(s):
+        return (s or '').strip().replace('/', '-').replace('\\', '-')
+
+    loc = clean_loc(link_text)
+
+    # DSG items
+    if sub in ('DSG', 'Full DSGs', 'Special DSG', 'Forward', 'Childrens Service'):
+        # language detection for file label
+        lang = ''
+        # prefer language words in decoded href or filename
+        for name in ('English', 'French', 'German', 'Italian', 'Portuguese', 'Russian', 'Spanish'):
+            if name.lower() in h:
+                lang = name
+                break
+
+        if sub == 'Forward':
+            # "[Month] [Year] Forward [Language]"
+            if month and year:
+                label = f"{month} {year} Forward {lang}" if lang else f"{month} {year} Forward"
+            elif year:
+                label = f"{year} Forward {lang}" if lang else f"{year} Forward"
+            else:
+                label = f"Forward {loc}"
+        elif sub == 'Full DSGs' or sub == 'Special DSG':
+            # "[Month] [Year] Full DSG [Language]" or Special Edition
+            tag = 'Full DSG' if sub == 'Full DSGs' else 'Special Edition DSG'
+            if month and year:
+                label = f"{month} {year} {tag} {lang}" if lang else f"{month} {year} {tag}"
+            elif year:
+                label = f"{year} {tag} {lang}" if lang else f"{year} {tag}"
+            else:
+                label = f"{tag} {loc}"
+        elif sub == 'Childrens Service':
+            # "[Month] [Year] Children's Service [Language]" (fall back)
+            if month and year:
+                label = f"{month} {year} Childrens Service {lang}" if lang else f"{month} {year} Childrens Service"
+            elif year:
+                label = f"{year} Childrens Service {lang}" if lang else f"{year} Childrens Service"
+            else:
+                label = f"Childrens Service {loc}"
+        else:
+            # regular DSG service with date -> "[Weekday] [Month] [Day] [Year] Divine Service Prep [Language]"
+            if date_obj:
+                weekday = date_obj.strftime('%A')
+                day = date_obj.day
+                y = date_obj.year
+                if lang:
+                    label = f"{weekday} {month} {day} {y} Divine Service Prep {lang}"
+                else:
+                    # try literal language in href or default to English
+                    label_lang = 'English' if 'en' in h or 'english' in h else ''
+                    label = f"{weekday} {month} {day} {y} Divine Service Prep {label_lang}".strip()
+            else:
+                # fallback
+                label = loc or 'Divine Service Prep'
+
+    # Schedules items
+    elif sub == 'Schedules':
+        # "[Month] [Year] [Location] Serving Schedule"
+        if month and year:
+            label = f"{month} {year} {loc} Serving Schedule"
+        elif year:
+            label = f"{year} {loc} Serving Schedule"
+        else:
+            label = f"{loc} Serving Schedule"
+    elif sub == 'Youth':
+        # Youth schedules (from schedule area) or youth DSG (from DSG area)
+        if flags.get('serving'):
+            if month and year:
+                label = f"{month} {year} {loc} Youth Schedule"
+            elif year:
+                label = f"{year} {loc} Youth Schedule"
+            else:
+                label = f"{loc} Youth Schedule"
+        else:
+            # youth DSG under Divine Service Prep: "[Month] [Year] Youth [Language]"
+            lang = ''
+            for name in ('English', 'French'):
+                if name.lower() in h:
+                    lang = name
+                    break
+            if month and year:
+                label = f"{month} {year} Youth {lang}" if lang else f"{month} {year} Youth"
+            elif year:
+                label = f"{year} Youth {lang}" if lang else f"{year} Youth"
+            else:
+                label = f"Youth {loc}"
+    elif sub == 'Seniors':
+        if month and year:
+            label = f"{month} {year} {loc} Seniors Schedule"
+        elif year:
+            label = f"{year} {loc} Seniors Schedule"
+        else:
+            label = f"{loc} Seniors Schedule"
+    elif sub == 'NACC Calendars':
+        # "[Month] [Year] NACC Calendar [National/Districts]"
+        if month and year:
+            label = f"{month} {year} NACC Calendar {loc}"
+        elif year:
+            label = f"{year} NACC Calendar {loc}"
+        else:
+            label = f"NACC Calendar {loc}"
+    else:
+        # fallback to original filename
+        label = os.path.splitext(fname)[0] or loc or 'download'
+
+    filename = label + (ext or '')
+    filename = re.sub(r'[\\/]+', '-', filename)
+    return dest, filename
 
 
 def save_url_to_path(url, dest_folder, filename, driver=None, overwrite=False):

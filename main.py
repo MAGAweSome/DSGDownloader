@@ -1,7 +1,19 @@
+"""
+DSG Downloader - main orchestrator
+
+This script coordinates UI selection, launches the browser, navigates MiniHQ,
+and downloads DSG and schedule files into a Year/Month/<subfolder> structure.
+
+High-level flow:
+- load user selection (GUI or terminal)
+- init Edge WebDriver
+- sign in (if credentials provided)
+- open MiniHQ, extract Divine Service Prep and Schedules items
+- create folders and save files according to mapping rules
+"""
+
 from src.config import (
     URL,
-    BUTTON_SELECTOR,
-    SELECTOR_TYPE,
     SIGNIN_LINK_SELECTOR,
     SIGNIN_LINK_SELECTOR_TYPE,
     USERNAME_SELECTOR,
@@ -182,6 +194,7 @@ def main():
                         print("- ", p)
             else:
                 print("No month-year pairs found to create month folders.")
+
 
             # Ensure subfolders inside each month folder. Only create folders for
             # features the user explicitly selected (avoid premature folder creation).

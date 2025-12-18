@@ -1,14 +1,34 @@
+"""
+Actions and helpers for scraping and saving DSG and Schedules content.
+
+This module provides small, focused helpers used by `main.py`:
+- browser interaction helpers (click, find inputs)
+- page extractors (webpart links, accordion items, schedule sections)
+- local filesystem helpers to create year/month/subfolder structure
+- mapping and download helpers to name and save files
+
+Comments are placed above non-obvious functions to explain intent.
+"""
+
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 
 
 def get_button_text(driver, selector, selector_type="css", timeout=10):
-    """Find an element by selector and return its visible text or value attribute.
-
-    - `selector_type` should be either "css" or "xpath".
-    - For <input> elements, the function will return the `value` attribute if `.text` is empty.
-    """
+    # Return the visible text for a control, or its value attribute for inputs.
+    # This helps detect buttons/inputs whose caption is stored as `value`.
+    by = By.CSS_SELECTOR if selector_type.lower() == "css" else By.XPATH
+    el = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, selector)))
+    text = el.text.strip()
+    if text:
+        return text
+    tag = el.tag_name.lower()
+    if tag in ("input", "button"):
+        val = el.get_attribute("value")
+        if val:
+            return val.strip()
+    return text
     by = By.CSS_SELECTOR if selector_type.lower() == "css" else By.XPATH
     el = WebDriverWait(driver, timeout).until(EC.presence_of_element_located((by, selector)))
     text = el.text.strip()
@@ -28,17 +48,14 @@ def get_button_text(driver, selector, selector_type="css", timeout=10):
 
 
 def click_element(driver, selector, selector_type="css", timeout=10):
-    """Wait for element to be clickable and click it.
-
-    Returns True if click was performed, raises on timeout or other failures.
-    """
+    # Click an element, falling back to JS click if needed.
     by = By.CSS_SELECTOR if selector_type.lower() == "css" else By.XPATH
     el = WebDriverWait(driver, timeout).until(EC.element_to_be_clickable((by, selector)))
     try:
         el.click()
         return True
     except Exception:
-        date_match = re.search(r'(20\d{2}-\d{2}-\d{2})', raw_href)
+        # Some pages prevent normal click; use JS click as a fallback.
         driver.execute_script("arguments[0].click();", el)
         return True
 

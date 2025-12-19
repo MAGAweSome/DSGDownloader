@@ -1,0 +1,6 @@
+# Secret files - DO NOT REMOVE
+token.json
+credentials.json
+.env
+__pycache__/
+*.ics

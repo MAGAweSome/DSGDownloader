@@ -63,6 +63,8 @@ def main():
     user_choices = get_user_selection()
 
     driver = init_driver()
+    # collect schedule file paths during processing so we can parse them after the browser closes
+    schedule_files = []
     try:
         try:
             driver.get(URL)
@@ -275,7 +277,9 @@ def main():
                                         else:
                                             print(f"        -> Failed to save ({reason}): {lh}")
                                 except Exception as e:
-                                    print("        -> Could not map/save destination/filename:", e)
+                                    import traceback
+                                    print("        -> Could not map/save destination/filename:")
+                                    print(traceback.format_exc())
                     else:
                         print(f"No accordion items found on {ml['text']} page for selected filters.")
 
@@ -289,6 +293,8 @@ def main():
                         pass
 
                 # After processing Divine Service Prep months, process Schedules month pages
+                # collect schedule file paths (saved or existing) so we can post-process PDFs
+                schedule_files = []
                 try:
                     schedule_elements = get_webpart_link_elements(driver, "Schedules", timeout=6)
                     schedule_months = []
@@ -351,6 +357,8 @@ def main():
                                             ok, reason = save_url_to_path(lh, dest, newname, driver=driver, overwrite=False)
                                             if ok:
                                                 full_path = os.path.join(dest, newname)
+                                                # record saved file for post-processing
+                                                schedule_files.append(full_path)
                                                 base_label = os.path.splitext(newname)[0]
                                                 display_label = base_label
                                                 # for Serving files user prefers the 'Serving' short form
@@ -360,11 +368,16 @@ def main():
                                                 print(f"           New Name: <-- {display_label}")
                                             else:
                                                 if reason == 'exists':
-                                                    print(f"        -> Skipped (exists): {os.path.join(dest, newname)}")
+                                                    existing_path = os.path.join(dest, newname)
+                                                    # record existing file so we can still parse it
+                                                    schedule_files.append(existing_path)
+                                                    print(f"        -> Skipped (exists): {existing_path}")
                                                 else:
                                                     print(f"        -> Failed to save ({reason}): {lh}")
                                         except Exception as e:
-                                            print("        -> Could not map/save destination/filename:", e)
+                                            import traceback
+                                            print("        -> Could not map/save destination/filename:")
+                                            print(traceback.format_exc())
                             else:
                                 print(f"  No schedule sections found on {sm['text']}.")
                         except Exception as e:
@@ -383,6 +396,46 @@ def main():
     finally:
         print("Closing browser...")
         driver.quit()
+        # After browser is closed, attempt to read any schedule PDFs we saved/skipped
+        try:
+            from src.actions import extract_text_from_pdf, find_date_and_location_for_query
+            # optional query from environment
+            query = os.environ.get('SCHEDULE_PDF_QUERY') or os.environ.get('PDF_QUERY')
+            if schedule_files:
+                print("\nPost-processing schedule PDFs:")
+                for p in schedule_files:
+                    try:
+                        # skip Youth/Seniors PDFs
+                        from src.actions import is_excluded_schedule_path
+                        if is_excluded_schedule_path(p):
+                            print(f"\n--- Skipping excluded schedule PDF: {p}")
+                            continue
+
+                        print(f"\n--- Reading: {p}")
+                        txt = extract_text_from_pdf(p)
+                        if not txt:
+                            print("(no text extracted — PDF may be scanned or extraction failed)")
+                            continue
+                        # print first N lines for brevity
+                        lines = txt.splitlines()
+                        preview = '\n'.join(lines[:200])
+                        print(preview)
+                        # if a query is provided, run heuristics and print matches
+                        if query:
+                            matches = find_date_and_location_for_query(txt, query)
+                            if matches:
+                                print(f"\nMatches for query '{query}':")
+                                for m in matches:
+                                    print(f"- date: {m.get('date')}, location: {m.get('location')}, index: {m.get('match_index')}")
+                            else:
+                                print(f"\nNo matches found for query '{query}'.")
+                    except Exception as e:
+                        print(f"Error post-processing PDF {p}: {e}")
+            else:
+                print("No schedule PDFs were recorded for post-processing.")
+        except Exception:
+            # best-effort only: do not raise errors during shutdown
+            pass
 
 
 if __name__ == "__main__":

@@ -12,6 +12,11 @@ An automated tool to download church schedules and sync your personal assignment
 
 ## 🚀 Getting Started
 
+## 🛠️ Prerequisites
+Before starting, ensure you have these installed:
+1. **Python 3.10 or higher**: [Download here](https://www.python.org/downloads/)
+2. **Git**: [Download here](https://git-scm.com/downloads) (Required for the 'git clone' command).
+
 ### 1. Clone and Install
 
 Open your terminal and run:

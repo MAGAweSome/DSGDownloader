@@ -196,64 +196,58 @@ def get_user_selection() -> Dict[str, Any]:
             })
             root.destroy()
 
-        # Countdown auto-submit: reset to 5s on any checkbox change; display remaining seconds
+        # Check if this is the first time the app is running by seeing if any saved data exists
+        is_first_run = not any([
+            saved.get('selections'),
+            saved.get('schedules_chosen'),
+            saved.get('schedules_sub')
+        ])
+
         remaining_seconds = tk.IntVar(value=5)
-        countdown_var = tk.StringVar(value=f"Auto-submit in {remaining_seconds.get()}s")
-        ttk.Label(frm, textvariable=countdown_var).grid(row=39, column=0, columnspan=4, pady=(6, 0))
 
-        def _update_countdown_label():
-            countdown_var.set(f"Auto-submit in {remaining_seconds.get()}s")
+        # Only start the countdown if it is NOT the first run
+        if not is_first_run:
+            countdown_var = tk.StringVar(value=f"Auto-submit in {remaining_seconds.get()}s")
+            ttk.Label(frm, textvariable=countdown_var).grid(row=39, column=0, columnspan=4, pady=(6, 0))
 
-        def reset_countdown(*_):
-            remaining_seconds.set(5)
-            _update_countdown_label()
+            def _update_countdown_label():
+                countdown_var.set(f"Auto-submit in {remaining_seconds.get()}s")
 
-        def auto_submit():
-            # call same submit handler
-            try:
-                on_submit()
-            except Exception:
-                pass
-            # if nothing selected, exit program
-            sel = result.get('selections') or set()
-            sched = result.get('schedules_chosen') or set()
-            subs = result.get('schedules_sub') or {}
-            if (not sel) and (not sched) and (not subs):
-                import sys
-                sys.exit(0)
+            def reset_countdown(*_):
+                remaining_seconds.set(5)
+                _update_countdown_label()
 
-        def tick():
-            remaining_seconds.set(max(0, remaining_seconds.get() - 1))
-            _update_countdown_label()
-            if remaining_seconds.get() <= 0:
-                auto_submit()
-            else:
-                root.after(1000, tick)
+            def tick():
+                remaining_seconds.set(max(0, remaining_seconds.get() - 1))
+                _update_countdown_label()
+                if remaining_seconds.get() <= 0:
+                    try:
+                        on_submit()
+                    except Exception:
+                        pass
+                else:
+                    root.after(1000, tick)
 
-        # attach traces to all IntVars to reset the countdown when user interacts
-        all_vars = []
-        all_vars.extend(list(sched_vars.values()))
-        all_vars.extend(list(district_vars.values()))
-        all_vars.extend(list(youth_vars.values()))
-        all_vars.extend(list(seniors_vars.values()))
-        all_vars.extend(list(opt_vars.values()))
-        all_vars.extend(list(full_lang_vars.values()))
-        all_vars.extend(list(se_lang_vars.values()))
-        all_vars.extend(list(foreword_lang_vars.values()))
-        all_vars.extend(list(bibread_lang_vars.values()))
-        all_vars.extend(list(bibref_lang_vars.values()))
+            # Start the 5-second tick
+            root.after(1000, tick)
+        else:
+            # First-time users see a manual prompt message instead
+            ttk.Label(frm, text="First run detected: Please configure your options and click Submit.").grid(row=39, column=0, columnspan=4, pady=(6, 0))
+
+        # attach traces to all IntVars to reset the countdown if a user interacts
+        all_vars = list(sched_vars.values()) + list(district_vars.values()) + \
+                   list(youth_vars.values()) + list(seniors_vars.values()) + \
+                   list(opt_vars.values()) + list(full_lang_vars.values()) + \
+                   list(se_lang_vars.values()) + list(foreword_lang_vars.values()) + \
+                   list(bibread_lang_vars.values()) + list(bibref_lang_vars.values())
+        
         for v in all_vars:
             try:
-                v.trace_add('write', lambda *a, v=v: reset_countdown())
+                # If it's the first run, we don't need reset_countdown because the timer isn't running
+                if not is_first_run:
+                    v.trace_add('write', lambda *a, v=v: reset_countdown())
             except Exception:
-                # older tkinter may use trace
-                try:
-                    v.trace('w', lambda *a, v=v: reset_countdown())
-                except Exception:
-                    pass
-
-        # start the countdown
-        root.after(1000, tick)
+                pass
 
         def on_cancel():
             root.destroy()
@@ -266,7 +260,7 @@ def get_user_selection() -> Dict[str, Any]:
         root.mainloop()
 
         if result:
-            # save selections back to .env (best-effort)
+            # save selections back to .env
             _save_json_env('DSG_UI_SELECTIONS', result.get('selections', []))
             _save_json_env('DSG_UI_SCHEDULES_CHOSEN', result.get('schedules_chosen', []))
             _save_json_env('DSG_UI_SCHEDULES_SUB', result.get('schedules_sub', {}))

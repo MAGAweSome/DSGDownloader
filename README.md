@@ -1,57 +1,120 @@
-Project: Simple Selenium Edge scraper
+# ⛪ DSG and Schedule Downloader
 
-What it does
-- Opens the page set in `.env` and returns the text (or `value`) of the button targeted by `BUTTON_SELECTOR`.
+An automated tool to download church schedules and sync your personal assignments directly to **Google Calendar**.
 
-Files
-- `src/config.py`: loads `.env` variables (`URL`, `BUTTON_SELECTOR`, `SELECTOR_TYPE`).
-- `src/browser.py`: initializes Edge WebDriver (uses `webdriver-manager` to download driver).
-- `src/actions.py`: finds the button and returns its text/value.
-- `main.py`: runner that ties everything together.
- - `main.py`: runner that ties everything together and now clicks the site's "Sign In" element by default.
+## ✨ Features
+- **Automatic Downloads**: Scrapes the NACC website for the latest schedules.
+- **Smart Parsing**: Reads PDF grids to find exactly where you are scheduled.
+- **Calendar Sync**: Automatically creates Google Calendar events with 24 hour reminders.
+- **Duplicate Prevention**: Skips events already on your calendar.
 
-Setup (Windows PowerShell)
+---
 
-1) Create and activate a virtualenv (recommended):
+## 🚀 Getting Started
+
+### 1. Clone and Install
+
+Open your terminal and run:
 
 ```powershell
+# Clone the repository
+git clone https://github.com/MAGAweSome/DSGDownloader.git
+cd DSGDownloader
+
+# Create a virtual environment
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
-```
 
-(If using cmd.exe: `.venv\Scripts\activate.bat`)
-
-2) Install dependencies:
-
-```powershell
+# Install requirements
 pip install -r requirements.txt
 ```
 
-3) Run the script:
+---
+
+## 2. Google Calendar API Setup (Detailed)
+
+This step allows the program to safely communicate with your Google Calendar. Follow these steps exactly.
+
+### Step 1: Open Google Cloud Console
+Go to:  
+https://console.cloud.google.com/
+
+---
+
+### Step 2: Create a Project
+1. Click the project dropdown at the top left.  
+2. Select **New Project**.  
+3. Name it **My Calendar Sync**.  
+4. Click **Create**.
+
+---
+
+### Step 3: Enable the Google Calendar API
+1. In the search bar at the top, type **Google Calendar API**.  
+2. Click it in the results.  
+3. Click the blue **Enable** button.
+
+---
+
+### Step 4: Configure OAuth Consent Screen
+1. On the left sidebar, click **APIs and Services** > **OAuth consent screen**.  
+2. Select **External** and click **Create**.  
+3. Fill in:
+   - **App name** (example: My Sync)  
+   - **User support email**  
+   - **Developer contact info**  
+4. Click **Save and Continue** through the remaining pages.
+
+---
+
+### Step 5: Create OAuth Credentials
+1. On the left sidebar, click **Credentials**.  
+2. Click **+ Create Credentials** at the top.  
+3. Choose **OAuth client ID**.  
+4. For **Application type**, select **Desktop App**.  
+5. Name it **My Desk Sync**.  
+6. Click **Create**.
+
+---
+
+### Step 6: Download Your Key
+1. A box will appear saying **OAuth client created**.  
+2. Click **Download JSON**.  
+3. Go to your Downloads folder and rename the file to:  
+   **credentials.json**  
+4. Move it into your **DSGDownloader** project folder.
+
+---
+
+### 3. Configure Your Environment
+
+1. Copy `.env.example` and rename it to `.env`.  
+2. Fill in your NAC website `USERNAME` and `PASSWORD`.  
+3. Set `SEARCH_NAME` to your name exactly as it appears on the PDF schedule.
+
+---
+
+## 📅 How to Run
+
+Simply run the main orchestrator:
 
 ```powershell
 python main.py
 ```
 
-Notes
-- Ensure Microsoft Edge is installed. `webdriver-manager` will download the appropriate EdgeDriver.
-- If Google changes markup, update `BUTTON_SELECTOR` in `.env` to the correct CSS or set `SELECTOR_TYPE=xpath` and provide an XPath.
- - The project now defaults to `https://naccanada.org` and clicks the "Sign In" element. If the site markup changes, update `BUTTON_SELECTOR` in `.env` (use `SELECTOR_TYPE=xpath` for XPath selectors).
+### What happens next
 
-Troubleshooting
-- If EdgeDriver download fails, you can manually download a matching EdgeDriver and add it to PATH.
-Manual EdgeDriver fallback
+- **Selection**: A window pops up for you to select which schedules or DSGs to download.  
+- **Download**: Microsoft Edge opens and automatically downloads your files into organized folders.  
+- **Parsing**: The script scans the new PDFs for your `SEARCH_NAME`.  
+- **Sync**: If matches are found, they are pushed to Google Calendar.  
+  - On the first run, a browser tab will open for you to authorize the application.
 
-- If automatic download fails (offline, DNS, or corporate blocking), download the matching EdgeDriver for your Edge version from:
-	https://developer.microsoft.com/en-us/microsoft-edge/tools/webdriver/
+---
 
-- Place `msedgedriver.exe` somewhere convenient and either:
-	- Add its folder to your `PATH`, or
-	- Set `EDGE_DRIVER_PATH` in `.env` to the full path to `msedgedriver.exe` (example: `C:\drivers\msedgedriver.exe`).
+## 🛡️ Security Note
 
-- The script will try (in order): `EDGE_DRIVER_PATH` from `.env`, automatic download via `webdriver-manager`, then look for `msedgedriver` on `PATH`.
- - The script will try (in order): `EDGE_DRIVER_PATH` from `.env`, automatic download via `webdriver-manager`, then look for `msedgedriver` on `PATH`.
+This project uses a `.gitignore` file to ensure your `credentials.json`, `token.json`, and `.env` files are never uploaded to GitHub.  
+Never share these files or your Client Secret with anyone.
 
-Skip webdriver-manager (if it hangs)
-
-- If webdriver-manager is causing long waits or hangs while detecting your Edge version, set `SKIP_WEBDRIVER_MANAGER=true` in `.env` to avoid calling webdriver-manager. When enabled, the script will only use `EDGE_DRIVER_PATH` or a driver found on `PATH`.
+---

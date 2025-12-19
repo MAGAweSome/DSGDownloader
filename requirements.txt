@@ -1,8 +1,9 @@
 selenium>=4.0.0
 python-dotenv
 webdriver-manager
-PyPDF2
+pdfplumber
 prettytable
-pytz ics
-pywin32
---upgrade google-api-python-client google-auth-httplib2 google-auth-oauthlib
+pytz
+google-api-python-client
+google-auth-httplib2
+google-auth-oauthlib

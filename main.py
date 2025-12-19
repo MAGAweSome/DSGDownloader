@@ -396,47 +396,14 @@ def main():
     finally:
         print("Closing browser...")
         driver.quit()
-        # After browser is closed, attempt to read any schedule PDFs we saved/skipped
-        try:
-            from src.actions import extract_text_from_pdf, find_date_and_location_for_query
-            # optional query from environment
-            query = os.environ.get('SCHEDULE_PDF_QUERY') or os.environ.get('PDF_QUERY')
-            if schedule_files:
-                print("\nPost-processing schedule PDFs:")
-                for p in schedule_files:
-                    try:
-                        # skip Youth/Seniors PDFs
-                        from src.actions import is_excluded_schedule_path
-                        if is_excluded_schedule_path(p):
-                            print(f"\n--- Skipping excluded schedule PDF: {p}")
-                            continue
 
-                        print(f"\n--- Reading: {p}")
-                        txt = extract_text_from_pdf(p)
-                        if not txt:
-                            print("(no text extracted — PDF may be scanned or extraction failed)")
-                            continue
-                        # print first N lines for brevity
-                        lines = txt.splitlines()
-                        preview = '\n'.join(lines[:200])
-                        print(preview)
-                        # if a query is provided, run heuristics and print matches
-                        if query:
-                            matches = find_date_and_location_for_query(txt, query)
-                            if matches:
-                                print(f"\nMatches for query '{query}':")
-                                for m in matches:
-                                    print(f"- date: {m.get('date')}, location: {m.get('location')}, index: {m.get('match_index')}")
-                            else:
-                                print(f"\nNo matches found for query '{query}'.")
-                    except Exception as e:
-                        print(f"Error post-processing PDF {p}: {e}")
-            else:
-                print("No schedule PDFs were recorded for post-processing.")
-        except Exception:
-            # best-effort only: do not raise errors during shutdown
-            pass
+        # START THE CALENDAR SYNC AUTOMATICALLY
+        print("\n--- Starting Google Calendar Sync ---")
+        import subprocess
+        import sys
 
+        # This command runs your read_schedule script just like you would in the terminal
+        subprocess.run([sys.executable, "tools/read_schedule.py"])
 
 if __name__ == "__main__":
     main()

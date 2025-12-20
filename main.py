@@ -48,7 +48,8 @@ from urllib.parse import urlparse
 from selenium.common.exceptions import WebDriverException
 import time
 import os
-
+import json
+from src.pdf_tools.highlighter import highlight_names_in_pdf
 
 def main():
     # Try a DNS lookup but continue even if it fails — user requested a simple open-wait-close test
@@ -404,6 +405,36 @@ def main():
 
         # This command runs your read_schedule script just like you would in the terminal
         subprocess.run([sys.executable, "tools/read_schedule.py"])
+
+        # 1. Filter the list to exclude Youth and Senior schedules
+        # We use a list comprehension to keep it clean and readable
+        filtered_files = [
+            path for path in schedule_files 
+            if "youth" not in path.lower() and "senior" not in path.lower()
+        ]
+
+        if filtered_files:
+            print("\n--- Highlighting Minister Names in PDFs ---")
+            
+            # 2. Get your config from the environment
+            import json
+            color_config = os.getenv("MINISTER_COLORS", "{}")
+            opacity = float(os.getenv("HIGHLIGHT_OPACITY", 0.5))
+            
+            try:
+                name_color_map = json.loads(color_config)
+                
+                # 3. Import and run the highlighter for each filtered file
+                from src.pdf_tools.highlighter import highlight_names_in_pdf
+                
+                for pdf_path in filtered_files:
+                    print(f"Processing: {os.path.basename(pdf_path)}")
+                    highlight_names_in_pdf(pdf_path, name_color_map, opacity)
+                    
+            except Exception as e:
+                print(f"Error during highlighting process: {e}")
+        else:
+            print("\nNo serving schedules found to highlight.")
 
 if __name__ == "__main__":
     main()

@@ -416,25 +416,20 @@ def main():
         if filtered_files:
             print("\n--- Highlighting Minister Names in PDFs ---")
             
-            # 2. Get your config from the environment
-            import json
-            color_config = os.getenv("MINISTER_COLORS", "{}")
-            opacity = float(os.getenv("HIGHLIGHT_OPACITY", 0.5))
+            # Use the choices directly from the UI
+            name_color_map = user_choices.get('minister_colors', {})
+            opacity = user_choices.get('highlight_opacity', 0.5)
             
-            try:
-                name_color_map = json.loads(color_config)
-                
-                # 3. Import and run the highlighter for each filtered file
-                from src.pdf_tools.highlighter import highlight_names_in_pdf
-                
-                for pdf_path in filtered_files:
-                    print(f"Processing: {os.path.basename(pdf_path)}")
-                    highlight_names_in_pdf(pdf_path, name_color_map, opacity)
-                    
-            except Exception as e:
-                print(f"Error during highlighting process: {e}")
-        else:
-            print("\nNo serving schedules found to highlight.")
+            if name_color_map:
+                try:
+                    from src.pdf_tools.highlighter import highlight_names_in_pdf
+                    for pdf_path in filtered_files:
+                        print(f"Processing: {os.path.basename(pdf_path)}")
+                        highlight_names_in_pdf(pdf_path, name_color_map, opacity)
+                except Exception as e:
+                    print(f"Error during highlighting process: {e}")
+            else:
+                print("No minister colors defined in UI. Skipping highlighting.")
 
 if __name__ == "__main__":
     main()

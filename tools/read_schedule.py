@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 # Import the specific actions for extracting text and finding files
-from src.actions import (
+from src.actions.file_system_actions import (
     extract_text_from_pdf,
     find_schedule_pdfs,
 )

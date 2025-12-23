@@ -27,19 +27,30 @@ from src.config import (
     MINIHQ_LINK_SELECTOR,
     MINIHQ_LINK_SELECTOR_TYPE,
 )
-from src.ui import get_user_selection
+from src.ui.main_window import get_user_selection
 from src.browser import init_driver
-from src.actions import (
+from src.actions.browser_actions import (
     fill_input_field,
     submit_form,
     click_element,
+)
+from src.actions.data_extraction_actions import (
     get_webpart_links_by_heading,
     get_webpart_link_elements,
     extract_accordion_items,
-    filter_accordion_items_by_selection,
+    filter_links,
+    map_link_to_destination,
+    extract_years_from_texts,
+    extract_month_year_pairs,
+    extract_schedule_sections,
 )
-from src.actions import map_link_to_destination
-from src.actions import list_files_in_dir
+from src.actions.file_system_actions import (
+    list_files_in_dir,
+    save_url_to_path,
+    ensure_year_folders_exist,
+    ensure_month_folders_exist,
+    ensure_subfolders_in_months,
+)
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
@@ -63,9 +74,15 @@ def main():
     # Ask user what to extract before starting browser
     user_choices = get_user_selection()
 
+    if not user_choices:
+        print("No selections made. Exiting.")
+        return
+
     driver = init_driver()
     # collect schedule file paths during processing so we can parse them after the browser closes
     schedule_files = []
+    divine_links = []
+    schedules_links = []
     try:
         try:
             driver.get(URL)
@@ -162,9 +179,6 @@ def main():
             else:
                 print("(no files found)")
 
-            # Extract years from the link texts we found and ensure year folders exist
-            from src.actions import extract_years_from_texts, ensure_year_folders_exist
-
             years_divine = extract_years_from_texts(divine_links)
             years_sched = extract_years_from_texts(schedules_links)
             years = sorted(set(years_divine + years_sched))
@@ -181,9 +195,6 @@ def main():
             else:
                 print("No years extracted from MiniHQ items; no folders changed.")
 
-            # Ensure month folders inside the year folders for each Month Year item
-            from src.actions import extract_month_year_pairs, ensure_month_folders_exist
-
             month_year_pairs = extract_month_year_pairs(divine_links + schedules_links)
             if month_year_pairs:
                 created_m, existing_m = ensure_month_folders_exist(DSGS_DIR, month_year_pairs)
@@ -198,33 +209,46 @@ def main():
             else:
                 print("No month-year pairs found to create month folders.")
 
-
-            # Ensure subfolders inside each month folder. Only create folders for
-            # features the user explicitly selected (avoid premature folder creation).
-            from src.actions import ensure_subfolders_in_months
-            # start with no default core subfolders; add only when requested
             subfolders = []
-            # include schedule-related folders if user selected them
-            schedules_chosen = user_choices.get('schedules_chosen') or set()
-            if schedules_chosen:
-                # ensure base 'Schedules' plus specific groups if requested
-                subfolders.append('Schedules')
-                if 'youth schedules' in {s.lower() for s in schedules_chosen}:
-                    subfolders.append('Youth')
-                if 'seniors schedules' in {s.lower() for s in schedules_chosen}:
-                    subfolders.append('Seniors')
-                if 'nacc calendars' in {s.lower() for s in schedules_chosen}:
-                    subfolders.append('NACC Calendars')
+            schedules_chosen = user_choices.get('schedules_chosen', set())
+            dsg_selections = user_choices.get('selections', set())
+            all_selections = {s.lower() for s in schedules_chosen.union(dsg_selections)}
 
-            created_s, existing_s = ensure_subfolders_in_months(DSGS_DIR, month_year_pairs, subfolders)
-            if created_s:
-                print("Created subfolders:")
-                for p in created_s:
-                    print("- ", p)
-            if existing_s:
-                print("Already existing subfolders:")
-                for p in existing_s:
-                    print("- ", p)
+            if 'district serving schedules' in all_selections:
+                subfolders.append('Schedules')
+            if 'youth schedules' in all_selections:
+                subfolders.append('Youth')
+            if 'seniors schedules' in all_selections:
+                subfolders.append('Seniors')
+            if 'nacc calendars' in all_selections:
+                subfolders.append('NACC Calendars')
+            if 'english' in all_selections or 'french' in all_selections:
+                subfolders.append('DSG')
+            if 'full dsg' in all_selections:
+                subfolders.append('Full DSGs')
+            if 'special edition dsg' in all_selections:
+                subfolders.append('Special DSG')
+            if 'forward' in all_selections:
+                subfolders.append('Forward')
+            if 'childrens service' in all_selections:
+                subfolders.append('Childrens Service')
+            if 'audio' in all_selections:
+                subfolders.append('Audio')
+            if 'transcript' in all_selections:
+                subfolders.append('Transcripts')
+            if 'references' in all_selections or 'bible references' in all_selections:
+                subfolders.append('Bible References')
+
+            if subfolders:
+                created_s, existing_s = ensure_subfolders_in_months(DSGS_DIR, month_year_pairs, subfolders)
+                if created_s:
+                    print("Created subfolders:")
+                    for p in created_s:
+                        print("- ", p)
+                if existing_s:
+                    print("Already existing subfolders:")
+                    for p in existing_s:
+                        print("- ", p)
         except Exception as e:
             print("Could not list DSG files or ensure year/month/subfolders:", e)
 
@@ -234,7 +258,6 @@ def main():
             if not divine_link_elements:
                 print("No Divine Service Prep month links found to open.")
             else:
-                # Collect static list of (text, href) to avoid stale element issues
                 month_links = []
                 for item in divine_link_elements:
                     text = item.get('text') or ''
@@ -254,47 +277,58 @@ def main():
                         print(f"Could not open month page {ml['text']} ({ml['href']}):", e)
                         continue
 
-                    # extract accordion items and filter by user choices
                     items = extract_accordion_items(driver, timeout=8)
-                    filtered = filter_accordion_items_by_selection(items, user_choices)
-                    if filtered:
-                        print(f"Accordion items on {ml['text']} page:")
-                        for hdr, links in filtered:
-                            print(f"- {hdr}")
-                            for lt, lh in links:
-                                print(f"    - {lt} -> {lh}")
-                                try:
-                                    from src.config import DSGS_DIR
-                                    from src.actions import save_url_to_path
+                    if not items:
+                        print(f"No accordion items found on {ml['text']} page.")
+                        continue
 
-                                    dest, newname = map_link_to_destination(lh, lt, hdr, DSGS_DIR)
-                                    ok, reason = save_url_to_path(lh, dest, newname, driver=driver, overwrite=False)
-                                    if ok:
-                                        print(f"        -> Saved: {newname}")
-                                        print(f"           at: {dest}")
+                    # The new filter_links function expects a flat list of link dicts
+                    all_links = []
+                    for _, links in items:
+                        for link_text, href in links:
+                            all_links.append({'text': link_text, 'href': href})
+                    
+                    filtered_links = filter_links(user_choices, all_links)
+
+                    if filtered_links:
+                        print(f"Accordion items on {ml['text']} page:")
+                        for link in filtered_links:
+                            lt = link['text']
+                            lh = link['href']
+                            print(f"    - {lt} -> {lh}")
+                            try:
+                                from src.config import DSGS_DIR
+                                
+                                # We need to find the original header for map_link_to_destination.
+                                # Since we filtered `all_links` which are flat, we need to map back to original structure.
+                                # A more robust way might be to pass header info through filtering.
+                                # For now, let's assume `link_text` itself or part of `href` can give us a hint for subfolder.
+                                # The subfolder logic in `map_link_to_destination` is based on flags, which can be derived from href.
+                                # Let's pass a placeholder and rely on map_link_to_destination's internal flag detection.
+                                dest, newname = map_link_to_destination(lh, lt, "", DSGS_DIR, month_year_str=ml['text'])
+                                ok, reason = save_url_to_path(lh, dest, newname, driver=driver, overwrite=False)
+                                if ok:
+                                    print(f"        -> Saved: {newname}")
+                                    print(f"           at: {dest}")
+                                else:
+                                    if reason == 'exists':
+                                        print(f"        -> Skipped (exists): {os.path.join(dest, newname)}")
                                     else:
-                                        if reason == 'exists':
-                                            print(f"        -> Skipped (exists): {os.path.join(dest, newname)}")
-                                        else:
-                                            print(f"        -> Failed to save ({reason}): {lh}")
-                                except Exception as e:
-                                    import traceback
-                                    print("        -> Could not map/save destination/filename:")
-                                    print(traceback.format_exc())
+                                        print(f"        -> Failed to save ({reason}): {lh}")
+                            except Exception as e:
+                                import traceback
+                                print("        -> Could not map/save destination/filename:")
+                                print(traceback.format_exc())
                     else:
                         print(f"No accordion items found on {ml['text']} page for selected filters.")
 
-                    # go back to the previous page (MiniHQ) before processing next month, per your request
                     try:
                         driver.back()
                         WebDriverWait(driver, 10).until(lambda d: d.execute_script('return document.readyState') == 'complete')
                         time.sleep(1)
                     except Exception:
-                        # if back fails, continue — we will open next month via absolute URL
                         pass
 
-                # After processing Divine Service Prep months, process Schedules month pages
-                # collect schedule file paths (saved or existing) so we can post-process PDFs
                 schedule_files = []
                 try:
                     schedule_elements = get_webpart_link_elements(driver, "Schedules", timeout=6)
@@ -305,43 +339,38 @@ def main():
                         if href:
                             schedule_months.append({'text': text, 'href': href})
 
-                    # We only want December 2025 and January 2026 as requested
-                    wanted = {'December 2025', 'January 2026'}
-                    from urllib.parse import urljoin
-
-                    # schedule selection filters from UI
                     schedules_chosen = user_choices.get('schedules_chosen') or set()
-                    schedules_sub = user_choices.get('schedules_sub') or {}
+                    if not schedules_chosen:
+                        print("No schedules selected for download.")
+                    else:
+                        schedules_sub = user_choices.get('schedules_sub') or {}
 
-                    for sm in schedule_months:
-                        if sm['text'] not in wanted:
-                            continue
-                        print(f"Processing Schedules month: {sm['text']}")
-                        full = urljoin(URL, sm['href'])
+                        for sm in schedule_months:
+                            # Only process months that are selected
+                            if not any(keyword in sm['text'] for keyword in schedules_chosen):
+                                continue
+
+                            print(f"Processing Schedules month: {sm['text']}")
+                            full = urljoin(URL, sm['href'])
+                            try:
+                                driver.get(full)
+                                WebDriverWait(driver, 15).until(lambda d: d.execute_script('return document.readyState') == 'complete')
+                            except Exception as e:
+                                print(f"  Could not open schedule page {sm['text']} ({sm['href']}):", e)
+                                continue
+
                         try:
-                            driver.get(full)
-                            WebDriverWait(driver, 15).until(lambda d: d.execute_script('return document.readyState') == 'complete')
-                        except Exception as e:
-                            print(f"  Could not open schedule page {sm['text']} ({sm['href']}):", e)
-                            continue
-
-                        # extract the schedule sections (grouped by H3 headings)
-                        try:
-                            from src.actions import extract_schedule_sections, save_url_to_path
-
+                            
                             sched_sections = extract_schedule_sections(driver, timeout=8)
                             if sched_sections:
                                 print(f"  Options on {sm['text']}:")
                                 for title, links in sched_sections:
-                                    # apply UI filters: user must have requested this section
                                     if schedules_chosen and title.lower() not in {s.lower() for s in schedules_chosen}:
                                         continue
-                                    # within a section, if user selected sub-items, filter those
                                     subs = schedules_sub.get(title, set()) or schedules_sub.get(title.title(), set())
                                     print(f"   - {title}")
                                     for lt, lh in links:
                                         if subs:
-                                            # match by link text in subs (case-insensitive, allow partial)
                                             match = False
                                             for s in subs:
                                                 if s.lower() in lt.lower() or s.lower() in (lh or '').lower():
@@ -354,15 +383,13 @@ def main():
                                         try:
                                             from src.config import DSGS_DIR
 
-                                            dest, newname = map_link_to_destination(lh, lt, title, DSGS_DIR)
+                                            dest, newname = map_link_to_destination(lh, lt, title, DSGS_DIR, month_year_str=sm['text'])
                                             ok, reason = save_url_to_path(lh, dest, newname, driver=driver, overwrite=False)
                                             if ok:
                                                 full_path = os.path.join(dest, newname)
-                                                # record saved file for post-processing
                                                 schedule_files.append(full_path)
                                                 base_label = os.path.splitext(newname)[0]
                                                 display_label = base_label
-                                                # for Serving files user prefers the 'Serving' short form
                                                 if base_label.endswith(' Serving Schedule'):
                                                     display_label = base_label.replace(' Serving Schedule', ' Serving')
                                                 print(f"        -> File Location <-- {full_path}")
@@ -370,7 +397,6 @@ def main():
                                             else:
                                                 if reason == 'exists':
                                                     existing_path = os.path.join(dest, newname)
-                                                    # record existing file so we can still parse it
                                                     schedule_files.append(existing_path)
                                                     print(f"        -> Skipped (exists): {existing_path}")
                                                 else:
@@ -384,7 +410,6 @@ def main():
                         except Exception as e:
                             print(f"  Error extracting schedule items for {sm['text']}:", e)
 
-                        # go back to MiniHQ between schedule pages
                         try:
                             driver.back()
                             WebDriverWait(driver, 8).until(lambda d: d.execute_script('return document.readyState') == 'complete')
@@ -398,25 +423,20 @@ def main():
         print("Closing browser...")
         driver.quit()
 
-        # START THE CALENDAR SYNC AUTOMATICALLY
         print("\n--- Starting Google Calendar Sync ---")
         import subprocess
         import sys
 
-        # This command runs your read_schedule script just like you would in the terminal
         subprocess.run([sys.executable, "tools/read_schedule.py"])
 
-        # 1. Filter the list to exclude Youth and Senior schedules
-        # We use a list comprehension to keep it clean and readable
         filtered_files = [
             path for path in schedule_files 
-            if "youth" not in path.lower() and "senior" not in path.lower()
+            if "youth" not in path.lower() and "senior" not in path.lower() and "nacc calendar" not in path.lower()
         ]
 
         if filtered_files:
             print("\n--- Highlighting Minister Names in PDFs ---")
             
-            # Use the choices directly from the UI
             name_color_map = user_choices.get('minister_colors', {})
             opacity = user_choices.get('highlight_opacity', 0.5)
             

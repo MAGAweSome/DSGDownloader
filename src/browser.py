@@ -5,7 +5,7 @@ This module encapsulates Edge WebDriver creation logic. It prefers a locally
 configured driver (via `EDGE_DRIVER_PATH`), otherwise tries webdriver-manager,
 and finally checks PATH. Errors include actionable instructions.
 """
-
+import requests
 from selenium import webdriver
 from selenium.webdriver.edge.service import Service
 from webdriver_manager.microsoft import EdgeChromiumDriverManager
@@ -48,6 +48,22 @@ def init_driver():
     try:
         service = Service(EdgeChromiumDriverManager().install())
         return webdriver.Edge(service=service, options=options)
+    except (requests.exceptions.ConnectionError, OSError) as e:
+        # fallback: PATH
+        path_driver = which("msedgedriver") or which("msedgedriver.exe")
+        if path_driver:
+            service = Service(path_driver)
+            return webdriver.Edge(service=service, options=options)
+        # Last resort: if local path exists and now accessible
+        if local_path and os.path.exists(local_path):
+            service = Service(local_path)
+            return webdriver.Edge(service=service, options=options)
+        raise RuntimeError(
+            "Could not obtain EdgeDriver automatically. This is likely a network issue.\n"
+            "Options:\n"
+            " - Ensure you have a stable internet connection, OR\n"
+            " - Download EdgeDriver manually (matching your Edge version) and set EDGE_DRIVER_PATH in .env, OR add the driver binary to your PATH."
+        ) from e
     except Exception as e:
         # fallback: PATH
         path_driver = which("msedgedriver") or which("msedgedriver.exe")

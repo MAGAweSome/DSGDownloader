@@ -61,6 +61,11 @@ def main():
 
     # Ask user what to extract before starting browser
     user_choices = get_user_selection()
+    
+    # If user cancelled or no choices, exit gracefully
+    if user_choices is None:
+        print("Operation cancelled by user.")
+        return
 
     driver = init_driver()
     # collect schedule file paths during processing so we can parse them after the browser closes
@@ -234,15 +239,28 @@ def main():
                 print("No Divine Service Prep month links found to open.")
             else:
                 # Collect static list of (text, href) to avoid stale element issues
+                # Filter by user's selected months
+                selected_months = user_choices.get('selected_months', set())
                 month_links = []
                 for item in divine_link_elements:
                     text = item.get('text') or ''
                     href = item.get('href') or ''
                     if href:
-                        month_links.append({'text': text, 'href': href})
+                        # Check if any selected month appears in the link text
+                        if selected_months:
+                            # Extract month name from text (e.g., "January 2026" -> "January")
+                            should_include = any(month in text for month in selected_months)
+                            if should_include:
+                                month_links.append({'text': text, 'href': href})
+                        else:
+                            # If no months selected, include all
+                            month_links.append({'text': text, 'href': href})
 
                 from urllib.parse import urljoin
 
+                if not month_links:
+                    print("No month links match your selected months.")
+                
                 for idx, ml in enumerate(month_links):
                     print(f"Processing month {idx+1}/{len(month_links)}: {ml['text']}")
                     full = urljoin(URL, ml['href'])
@@ -297,24 +315,31 @@ def main():
                 schedule_files = []
                 try:
                     schedule_elements = get_webpart_link_elements(driver, "Schedules", timeout=6)
+                    selected_months = user_choices.get('selected_months', set())
                     schedule_months = []
                     for item in schedule_elements:
                         text = item.get('text') or ''
                         href = item.get('href') or ''
                         if href:
-                            schedule_months.append({'text': text, 'href': href})
+                            # Filter by selected months
+                            if selected_months:
+                                should_include = any(month in text for month in selected_months)
+                                if should_include:
+                                    schedule_months.append({'text': text, 'href': href})
+                            else:
+                                # If no months selected, include all
+                                schedule_months.append({'text': text, 'href': href})
 
-                    # We only want December 2025 and January 2026 as requested
-                    wanted = {'December 2025', 'January 2026'}
                     from urllib.parse import urljoin
 
                     # schedule selection filters from UI
                     schedules_chosen = user_choices.get('schedules_chosen') or set()
                     schedules_sub = user_choices.get('schedules_sub') or {}
 
+                    if not schedule_months:
+                        print("No schedule month links match your selected months.")
+
                     for sm in schedule_months:
-                        if sm['text'] not in wanted:
-                            continue
                         print(f"Processing Schedules month: {sm['text']}")
                         full = urljoin(URL, sm['href'])
                         try:
@@ -396,6 +421,21 @@ def main():
     finally:
         print("Closing browser...")
         driver.quit()
+
+        # APPLY PDF HIGHLIGHTING TO DOWNLOADED SCHEDULES
+        if schedule_files:
+            try:
+                from src.pdf_highlighter import process_schedule_pdfs, load_highlight_settings
+                print("\n--- Applying PDF Highlighting ---")
+                highlight_settings = load_highlight_settings()
+                results = process_schedule_pdfs(schedule_files, highlight_settings)
+                if results:
+                    total_highlights = sum(sum(counts.values()) for counts in results.values())
+                    print(f"Applied {total_highlights} highlights to {len(results)} schedule PDF(s).")
+                else:
+                    print("No highlights applied (auto-highlight may be disabled).")
+            except Exception as e:
+                print(f"Error applying highlights: {e}")
 
         # START THE CALENDAR SYNC AUTOMATICALLY
         print("\n--- Starting Google Calendar Sync ---")

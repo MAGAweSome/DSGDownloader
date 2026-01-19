@@ -16,6 +16,21 @@ from selenium.webdriver.support import expected_conditions as EC
 import os
 import pdfplumber
 
+MONTH_CODES = {
+    "January":  "01 Jan",
+    "February": "02 Feb",
+    "March":    "03 Mar",
+    "April":    "04 Apr",
+    "May":      "05 May",
+    "June":     "06 Jun",
+    "July":     "07 Jul",
+    "August":   "08 Aug",
+    "September":"09 Sep",
+    "October":  "10 Oct",
+    "November": "11 Nov",
+    "December": "12 Dec",
+}
+
 
 def get_button_text(driver, selector, selector_type="css", timeout=10):
     # Return the visible text for a control, or its value attribute for inputs.
@@ -265,7 +280,9 @@ def ensure_month_folders_exist(base_dir, month_year_pairs):
         return created, existing
     for month, year in month_year_pairs:
         year_folder = os.path.join(base_dir, year)
-        month_folder = os.path.join(year_folder, month)
+        folder_name = MONTH_CODES.get(month, month)
+        month_folder = os.path.join(year_folder, folder_name)
+
         if os.path.exists(month_folder):
             existing.append(month_folder)
         else:
@@ -286,7 +303,9 @@ def ensure_subfolders_in_months(base_dir, month_year_pairs, subfolders):
     if not base_dir:
         return created, existing
     for month, year in month_year_pairs:
-        month_folder = os.path.join(base_dir, year, month)
+        folder_name = MONTH_CODES.get(month, month)
+        month_folder = os.path.join(base_dir, year, folder_name)
+
         for sub in subfolders:
             p = os.path.join(month_folder, sub)
             if os.path.exists(p):
@@ -674,7 +693,8 @@ def map_link_to_destination(href, link_text, header_text, base_dir):
     if year:
         dest = os.path.join(dest, year)
     if month:
-        dest = os.path.join(dest, month)
+        folder_name = MONTH_CODES.get(month, month)
+        dest = os.path.join(dest, folder_name)
     if sub:
         dest = os.path.join(dest, sub)
 

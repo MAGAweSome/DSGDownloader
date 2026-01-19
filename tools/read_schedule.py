@@ -6,6 +6,21 @@ import pathlib
 import datetime
 import re
 
+MONTH_CODES = {
+    "January":  "01 Jan",
+    "February": "02 Feb",
+    "March":    "03 Mar",
+    "April":    "04 Apr",
+    "May":      "05 May",
+    "June":     "06 Jun",
+    "July":     "07 Jul",
+    "August":   "08 Aug",
+    "September":"09 Sep",
+    "October":  "10 Oct",
+    "November": "11 Nov",
+    "December": "12 Dec",
+}
+
 # Import the tool that creates pretty tables in your terminal
 from prettytable import PrettyTable, HRuleStyle
 # Import the tool that lets us use the private settings in your .env file
@@ -158,8 +173,13 @@ def main():
         next_year = next_month_dt.year
 
         # 3. BUILD FOLDER PATHS
-        first_dir = os.path.join(DSGS_DIR, str(current_year), current_month, 'Schedules')
-        second_dir = os.path.join(DSGS_DIR, str(next_year), next_month, 'Schedules')
+        # Convert month names to new folder format
+        current_month_folder = MONTH_CODES.get(current_month, current_month)
+        next_month_folder = MONTH_CODES.get(next_month, next_month)
+
+        first_dir = os.path.join(DSGS_DIR, str(current_year), current_month_folder, 'Schedules')
+        second_dir = os.path.join(DSGS_DIR, str(next_year), next_month_folder, 'Schedules')
+
 
         print(f"Today's date: {today.isoformat()}")
         print('\nChecking folders:')

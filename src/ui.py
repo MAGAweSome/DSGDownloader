@@ -516,6 +516,9 @@ def get_user_selection() -> Dict[str, Any]:
                 # Find and process PDFs
                 all_pdfs = find_schedule_pdfs(DSGS_DIR)
                 
+                # Check if create_copy is enabled - if so, only process originals
+                create_copy_enabled = current_settings.get('settings', {}).get('create_copy', False)
+                
                 # Filter PDFs based on selected months and years
                 selected_months = {m for m, v in month_vars.items() if v.get()}
                 selected_years = {y for y, v in year_vars.items() if v.get()}
@@ -524,6 +527,10 @@ def get_user_selection() -> Dict[str, Any]:
                 for pdf in all_pdfs:
                     filename = os.path.basename(pdf)
                     path = pdf.replace(DSGS_DIR, '').replace('\\', '/')
+                    
+                    # If create_copy is enabled, skip already-highlighted files
+                    if create_copy_enabled and ' - Highlighted' in filename:
+                        continue
                     
                     # Check month filter
                     month_match = not selected_months or any(month.lower() in filename.lower() for month in selected_months)
@@ -577,9 +584,15 @@ def get_user_selection() -> Dict[str, Any]:
                 use_ctk_messagebox = False
             
             try:
-                from src.pdf_highlighter import clear_highlights_from_pdfs
+                from src.pdf_highlighter import clear_highlights_from_pdfs, load_highlight_settings
                 from src.actions import find_schedule_pdfs
                 from src.config import DSGS_DIR
+                
+                # Load settings to check create_copy option
+                highlight_settings = load_highlight_settings()
+                
+                # Check if create_copy is enabled - if so, only clear highlighted copies
+                create_copy = highlight_settings.get('settings', {}).get('create_copy', False)
                 
                 # Find PDFs
                 all_pdfs = find_schedule_pdfs(DSGS_DIR)
@@ -592,6 +605,10 @@ def get_user_selection() -> Dict[str, Any]:
                 for pdf in all_pdfs:
                     filename = os.path.basename(pdf)
                     path = pdf.replace(DSGS_DIR, '').replace('\\', '/')
+                    
+                    # If create_copy is enabled, only include highlighted copies
+                    if create_copy and ' - Highlighted' not in filename:
+                        continue
                     
                     # Check month filter
                     month_match = not selected_months or any(month.lower() in filename.lower() for month in selected_months)
@@ -611,7 +628,13 @@ def get_user_selection() -> Dict[str, Any]:
                 
                 # Create formatted list of PDF files
                 pdf_list = '\n'.join([f"• {os.path.basename(pdf)}" for pdf in pdfs])
-                confirm_msg = f"Found {len(pdfs)} schedule PDF(s):\n\n{pdf_list}\n\nClear all highlights from these PDFs?"
+                
+                if create_copy:
+                    # If create_copy is enabled, we'll clear highlights from the highlighted copies
+                    confirm_msg = f"Found {len(pdfs)} highlighted copy/copies:\n\n{pdf_list}\n\nClear all highlights and background colors from these copies?"
+                else:
+                    # Otherwise, clear highlights from the PDFs
+                    confirm_msg = f"Found {len(pdfs)} schedule PDF(s):\n\n{pdf_list}\n\nClear all highlights and background colors from these PDFs?"
                 
                 if use_ctk_messagebox:
                     msg = CTkMessagebox(title='Clear Highlights', 
@@ -622,12 +645,13 @@ def get_user_selection() -> Dict[str, Any]:
                     proceed = messagebox.askyesno('Clear Highlights', confirm_msg)
                 
                 if proceed:
+                    # Clear highlights (and background colors) from PDFs
                     results = clear_highlights_from_pdfs(pdfs)
                     total = sum(results.values())
                     if use_ctk_messagebox:
-                        CTkMessagebox(title='Complete', message=f'Cleared {total} highlight(s) from {len(results)} PDF(s).', icon="check")
+                        CTkMessagebox(title='Complete', message=f'Cleared {total} highlight(s) and background colors from {len(results)} PDF(s).', icon="check")
                     else:
-                        messagebox.showinfo('Complete', f'Cleared {total} highlight(s) from {len(results)} PDF(s).')
+                        messagebox.showinfo('Complete', f'Cleared {total} highlight(s) and background colors from {len(results)} PDF(s).')
             except Exception as e:
                 # Show error using appropriate messagebox
                 if use_ctk_messagebox:

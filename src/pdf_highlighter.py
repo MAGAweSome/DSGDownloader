@@ -77,20 +77,26 @@ def hex_to_rgb(hex_color: str) -> Tuple[float, float, float]:
 
 
 def clear_highlights_from_pdf(pdf_path: str, remove_yellow_backgrounds: bool = True) -> int:
-    """Remove all highlight annotations and optionally yellow backgrounds from a PDF.
+    """Remove all highlight colors (custom highlights + yellow backgrounds) from a PDF.
+    
+    This removes:
+    - Highlight annotations (legacy)
+    - Yellow backgrounds (1 1 0 in content stream)  
+    - Custom highlight colors from cell backgrounds
     
     Args:
         pdf_path: Path to the PDF file
-        remove_yellow_backgrounds: If True, also remove yellow filled rectangles from content
+        remove_yellow_backgrounds: If True, also remove colored backgrounds from content
         
     Returns:
-        Number of items removed (annotations + backgrounds)
+        Number of items removed
     """
     if not os.path.exists(pdf_path):
         print(f"PDF not found: {pdf_path}")
         return 0
     
     try:
+        # First pass: Remove annotation highlights using PyMuPDF (legacy support)
         doc = fitz.open(pdf_path)
         removed_count = 0
         
@@ -102,123 +108,78 @@ def clear_highlights_from_pdf(pdf_path: str, remove_yellow_backgrounds: bool = T
             if annots:
                 for annot in annots:
                     # Check if it's a highlight annotation
+                    # Type 4 = Square (our rect annotations)
                     # Type 8 = Highlight, 9 = Underline, 10 = Squiggly, 11 = StrikeOut
-                    if annot.type[0] in (8, 9, 10, 11):
+                    if annot.type[0] in (4, 8, 9, 10, 11):
                         page.delete_annot(annot)
                         removed_count += 1
-            
-            # Remove yellow background rectangles from content stream
-            if remove_yellow_backgrounds:
-                # First, analyze all background rectangles to find the alternating pattern
-                drawings = page.get_drawings()
-                
-                # Collect all background colors with their Y positions
-                bg_colors_by_y = {}
-                yellow_positions = []
-                
-                for drawing in drawings:
-                    if drawing.get('fill'):
-                        fill = drawing['fill']
-                        if len(fill) >= 3:
-                            r, g, b = fill[0], fill[1], fill[2]
-                            rect = drawing.get('rect')
-                            
-                            # Check if it's a highlight color (yellow, etc.)
-                            is_highlight = (
-                                (r > 0.7 and g > 0.7 and b < 0.4) or  # Yellow
-                                (r > 0.8 and g > 0.5 and b < 0.4) or  # Orange  
-                                (r < 0.4 and g > 0.7 and b < 0.4) or  # Green
-                                (r > 0.8 and g < 0.4 and b > 0.7) or  # Pink
-                                (r < 0.4 and g > 0.5 and b > 0.8)     # Cyan
-                            )
-                            
-                            # Don't use black/very dark colors as replacement backgrounds
-                            is_black = (r < 0.1 and g < 0.1 and b < 0.1)
-                            
-                            if rect:
-                                y_pos = rect.y0
-                                if is_highlight:
-                                    yellow_positions.append((y_pos, fill))
-                                elif not is_black:
-                                    # Store non-highlight, non-black colors to learn the pattern
-                                    bg_colors_by_y[y_pos] = fill
-                
-                if yellow_positions:
-                    # Clean the page content
-                    page.clean_contents()
-                    
-                    # Get the raw content stream
-                    xref = page.get_contents()[0]
-                    cont = doc.xref_stream(xref).decode()
-                    
-                    # Parse and replace yellow fills
-                    lines = cont.split('\n')
-                    new_lines = []
-                    current_rect_y = None
-                    i = 0
-                    
-                    while i < len(lines):
-                        line = lines[i].strip()
-                        
-                        # Track rectangle definitions to get Y position
-                        if 're' in line:
-                            parts = line.split()
-                            if len(parts) >= 5:
-                                try:
-                                    y_pos = float(parts[1])
-                                    current_rect_y = y_pos
-                                except:
-                                    pass
-                        
-                        # Look for yellow color setting
-                        if 'rg' in line:
-                            parts = line.split()
-                            if len(parts) >= 4 and parts[-1] == 'rg':
-                                try:
-                                    r, g, b = float(parts[0]), float(parts[1]), float(parts[2])
-                                    is_highlight = (
-                                        (r > 0.7 and g > 0.7 and b < 0.4) or
-                                        (r > 0.8 and g > 0.5 and b < 0.4) or
-                                        (r < 0.4 and g > 0.7 and b < 0.4) or
-                                        (r > 0.8 and g < 0.4 and b > 0.7) or
-                                        (r < 0.4 and g > 0.5 and b > 0.8)
-                                    )
-                                    
-                                    if is_highlight and current_rect_y is not None:
-                                        # Find the closest non-highlight color at same Y position
-                                        replacement_color = None
-                                        min_diff = float('inf')
-                                        
-                                        for y, color in bg_colors_by_y.items():
-                                            diff = abs(y - current_rect_y)
-                                            if diff < min_diff and diff < 5:  # Within 5 units
-                                                min_diff = diff
-                                                replacement_color = color
-                                        
-                                        # Use the matching background color
-                                        if replacement_color:
-                                            new_lines.append(f"{replacement_color[0]} {replacement_color[1]} {replacement_color[2]} rg")
-                                        else:
-                                            # Fallback to white if no match found
-                                            new_lines.append("1 1 1 rg")
-                                        
-                                        removed_count += 1
-                                        i += 1
-                                        continue
-                                except:
-                                    pass
-                        
-                        new_lines.append(lines[i])
-                        i += 1
-                    
-                    # Update the page with filtered content
-                    new_cont = '\n'.join(new_lines)
-                    doc.update_stream(xref, new_cont.encode())
         
-        if removed_count > 0:
-            doc.save(pdf_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
-        
+        # Save temporary file
+        temp_path = pdf_path + ".temp"
+        doc.save(temp_path)
         doc.close()
+        
+        # Second pass: Remove all highlight colors using PyPDF content stream editing
+        if remove_yellow_backgrounds:
+            from pypdf import PdfReader, PdfWriter
+            from pypdf.generic import DecodedStreamObject
+            
+            # Load highlight settings to get all configured colors
+            settings = load_highlight_settings()
+            highlight_colors = set()
+            
+            # Add yellow (original background color to remove)
+            highlight_colors.add((1.0, 1.0, 0.0))
+            
+            # Add all configured highlight colors
+            for name_entry in settings.get('names', []):
+                color_hex = name_entry.get('color', '')
+                if color_hex:
+                    rgb = hex_to_rgb(color_hex)
+                    highlight_colors.add(rgb)
+            
+            reader = PdfReader(temp_path)
+            writer = PdfWriter()
+            
+            for page in reader.pages:
+                # Get the raw content bytes
+                content = page.get_contents()
+                if content is not None:
+                    content_bytes = content.get_data()
+                    original_len = len(content_bytes)
+                    
+                    # Replace each highlight color with light grey (0.949)
+                    # This matches the white/light grey row backgrounds
+                    for r, g, b in highlight_colors:
+                        # Format: "r g b rg" or "r g b RG"
+                        old_fill = f"{r:.6g} {g:.6g} {b:.6g} rg".encode()
+                        old_stroke = f"{r:.6g} {g:.6g} {b:.6g} RG".encode()
+                        new_color = b"0.949 0.949 0.949"
+                        
+                        content_bytes = content_bytes.replace(old_fill, new_color + b" rg")
+                        content_bytes = content_bytes.replace(old_stroke, new_color + b" RG")
+                    
+                    if len(content_bytes) != original_len:
+                        # Create new content stream with modified colors
+                        new_stream = DecodedStreamObject()
+                        new_stream.set_data(content_bytes)
+                        page.replace_contents(new_stream)
+                        removed_count += 1
+                
+                writer.add_page(page)
+            
+            # Save final result
+            with open(pdf_path, "wb") as f:
+                writer.write(f)
+            
+            # Clean up temp file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+        else:
+            # No yellow removal - just use the PyMuPDF result
+            if os.path.exists(temp_path):
+                os.replace(temp_path, pdf_path)
+        
         return removed_count
         
     except Exception as e:
@@ -251,20 +212,19 @@ def clear_highlights_from_pdfs(pdf_paths: List[str]) -> Dict[str, int]:
     return results
 
 
-def highlight_text_in_pdf(pdf_path: str, name: str, color: str, opacity: float = 0.5) -> int:
-    """Search for exact text matches and add permanent highlights.
+def highlight_text_in_pdf(pdf_path: str, name: str, color: str, opacity: float = 0.35) -> int:
+    """Search for exact text matches and add highlight annotations.
     
     Args:
         pdf_path: Path to the PDF file
         name: Exact text to search for (case-sensitive)
         color: Hex color string (e.g., "#FFFF00")
-        opacity: Highlight opacity 0-1
+        opacity: Highlight opacity 0-1 (default 0.35 for good readability)
         
     Returns:
         Number of highlights added
     """
     if not os.path.exists(pdf_path):
-        print(f"PDF not found: {pdf_path}")
         return 0
     
     try:
@@ -279,17 +239,52 @@ def highlight_text_in_pdf(pdf_path: str, name: str, color: str, opacity: float =
             text_instances = page.search_for(name)
             
             for inst in text_instances:
-                # Add highlight annotation
-                highlight = page.add_highlight_annot(inst)
-                highlight.set_colors({"stroke": rgb_color, "fill": rgb_color})
-                highlight.set_opacity(opacity)
-                highlight.update()
+                # Calculate dimensions of the original text box
+                original_width = inst.x1 - inst.x0
+                original_height = inst.y1 - inst.y0
+                
+                print(f"\n--- Found '{name}' on page {page_num + 1} ---")
+                print(f"Original rect: x0={inst.x0:.2f}, y0={inst.y0:.2f}, x1={inst.x1:.2f}, y1={inst.y1:.2f}")
+                print(f"Original WIDTH (x1-x0): {original_width:.2f}")
+                print(f"Original HEIGHT (y1-y0): {original_height:.2f}")
+                
+                # For rotated text: visual width = y-direction, visual height = x-direction
+                # Expand along the text length (y-direction) and shrink thickness (x-direction)
+                expanded_rect = fitz.Rect(
+                    inst.x0 + 0.5,    # Shrink thickness from left (visual top)
+                    inst.y0 - 1,      # Expand length at start (visual left)
+                    inst.x1 - 0.5,    # Shrink thickness from right (visual bottom)  
+                    inst.y1 + 1       # Expand length at end (visual right)
+                )
+                
+                # Calculate dimensions of the expanded box
+                expanded_width = expanded_rect.x1 - expanded_rect.x0
+                expanded_height = expanded_rect.y1 - expanded_rect.y0
+                
+                print(f"Expanded rect: x0={expanded_rect.x0:.2f}, y0={expanded_rect.y0:.2f}, x1={expanded_rect.x1:.2f}, y1={expanded_rect.y1:.2f}")
+                print(f"Expanded WIDTH (x1-x0): {expanded_width:.2f}")
+                print(f"Expanded HEIGHT (y1-y0): {expanded_height:.2f}")
+                
+                # Add rectangular annotation (not rounded like highlight)
+                annot = page.add_rect_annot(expanded_rect)
+                annot.set_colors(stroke=rgb_color, fill=rgb_color)
+                annot.set_opacity(opacity)
+                annot.set_border(width=0)  # No border
+                annot.update()
                 highlight_count += 1
         
         if highlight_count > 0:
-            doc.save(pdf_path, incremental=True, encryption=fitz.PDF_ENCRYPT_KEEP)
+            # Save to temp file first, then replace original
+            temp_path = pdf_path + ".temp"
+            doc.save(temp_path, deflate=True, garbage=4)
+            doc.close()
+            
+            # Replace original with temp file
+            import shutil
+            shutil.move(temp_path, pdf_path)
+        else:
+            doc.close()
         
-        doc.close()
         return highlight_count
         
     except Exception as e:
@@ -318,21 +313,30 @@ def highlight_pdf_with_settings(pdf_path: str, settings: Dict = None) -> Dict[st
     create_copy = settings.get('settings', {}).get('create_copy', False)
     target_path = pdf_path
     
+    print(f"Create copy setting: {create_copy}")
+    
     if create_copy:
         base, ext = os.path.splitext(pdf_path)
         target_path = f"{base} - Highlighted{ext}"
+        print(f"Will create copy at: {target_path}")
         try:
             import shutil
             shutil.copy2(pdf_path, target_path)
-            print(f"Created highlighted copy: {target_path}")
+            print(f"✓ Successfully created highlighted copy: {os.path.basename(target_path)}")
+            
+            # Clear yellow backgrounds FIRST before adding custom highlights
+            print(f"Clearing yellow backgrounds from copy...")
+            cleared = clear_highlights_from_pdf(target_path, remove_yellow_backgrounds=True)
+            print(f"✓ Cleared {cleared} yellow background(s)")
+            
         except Exception as e:
-            print(f"Error creating copy: {e}")
+            print(f"✗ Error creating copy: {e}")
             target_path = pdf_path  # Fall back to original
     
     opacity = settings.get('settings', {}).get('highlight_opacity', 0.5)
     results = {}
     
-    # Process each enabled name
+    # Now add custom name highlights AFTER clearing yellow
     for name_entry in settings.get('names', []):
         if not name_entry.get('enabled', True):
             continue

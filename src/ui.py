@@ -57,6 +57,13 @@ def _load_json_env(key: str):
 def _save_json_env(key: str, value: Any) -> None:
     try:
         from dotenv import set_key
+        # Ensure .env exists so set_key has a target file
+        try:
+            if not os.path.exists(ENV_PATH):
+                with open(ENV_PATH, 'a', encoding='utf-8'):
+                    pass
+        except Exception:
+            pass
         # convert nested sets to lists so JSON can serialize them
         def _to_jsonable(v):
             if isinstance(v, set):
@@ -278,16 +285,8 @@ def get_user_selection() -> Dict[str, Any]:
         other_lang_frame.grid_columnconfigure(1, weight=1)
         other_lang_frame.grid_columnconfigure(2, weight=1)
         
-        # ===== SECTION 4: Settings =====
-        settings_frame = ctk.CTkFrame(scrollable_download)
-        settings_frame.pack(fill='x', padx=10, pady=(5, 15))
-        
-        ctk.CTkLabel(settings_frame, text='⚙️ Settings', 
-                    font=ctk.CTkFont(size=15, weight="bold")).pack(anchor='w', padx=15, pady=(15, 10))
-        
+        # Auto submit toggle lives in the bottom action area (near Submit/Save/Cancel)
         auto_submit_var = ctk.IntVar(value=1 if saved.get('auto_submit_enabled', True) else 0)
-        ctk.CTkCheckBox(settings_frame, text='Enable auto-submit (5s countdown)', 
-                       variable=auto_submit_var).pack(anchor='w', padx=20, pady=8)
 
         # ===== TAB 2: Month Selection =====
         tabview.add("Month Selection")
@@ -758,22 +757,63 @@ def get_user_selection() -> Dict[str, Any]:
 
         remaining_seconds = ctk.IntVar(value=5)
 
-        # Only start the countdown if it is NOT the first run AND auto-submit is enabled
-        if not is_first_run and auto_submit_var.get():
-            countdown_var = ctk.StringVar(value=f"Auto-submit in {remaining_seconds.get()}s")
-            countdown_label = ctk.CTkLabel(root, textvariable=countdown_var, 
-                                          font=ctk.CTkFont(size=13, weight="bold"),
-                                          text_color="orange")
-            countdown_label.pack(pady=(10, 0))
+        # Status label is always present; countdown label is shown only when enabled.
+        status_label = ctk.CTkLabel(root, text="Configure your options and click Submit when ready.",
+                                   font=ctk.CTkFont(size=12))
+        status_label.pack(pady=(10, 0))
 
-            def _update_countdown_label():
+        countdown_var = None
+        countdown_label = None
+        countdown_after_id = None
+
+        def _can_autosubmit_now() -> bool:
+            return (not is_first_run) and bool(auto_submit_var.get())
+
+        def _update_countdown_label():
+            nonlocal countdown_var
+            if countdown_var is not None:
                 countdown_var.set(f"Auto-submit in {remaining_seconds.get()}s")
 
-            def reset_countdown(*_):
-                remaining_seconds.set(5)
-                _update_countdown_label()
+        def stop_countdown():
+            nonlocal countdown_after_id, countdown_label, countdown_var
+            if countdown_after_id is not None:
+                try:
+                    root.after_cancel(countdown_after_id)
+                except Exception:
+                    pass
+                countdown_after_id = None
+            if countdown_label is not None:
+                try:
+                    countdown_label.destroy()
+                except Exception:
+                    pass
+                countdown_label = None
+            countdown_var = None
+
+        def start_countdown():
+            nonlocal countdown_after_id, countdown_label, countdown_var
+            stop_countdown()
+
+            if not _can_autosubmit_now():
+                return
+
+            remaining_seconds.set(5)
+            countdown_var = ctk.StringVar(value=f"Auto-submit in {remaining_seconds.get()}s")
+            countdown_label = ctk.CTkLabel(
+                root,
+                textvariable=countdown_var,
+                font=ctk.CTkFont(size=13, weight="bold"),
+                text_color="orange",
+            )
+            countdown_label.pack(pady=(10, 0))
 
             def tick():
+                nonlocal countdown_after_id
+                # If user toggled auto-submit off while counting down, stop.
+                if not _can_autosubmit_now():
+                    stop_countdown()
+                    return
+
                 remaining_seconds.set(max(0, remaining_seconds.get() - 1))
                 _update_countdown_label()
                 if remaining_seconds.get() <= 0:
@@ -782,18 +822,36 @@ def get_user_selection() -> Dict[str, Any]:
                     except Exception:
                         pass
                 else:
-                    root.after(1000, tick)
+                    countdown_after_id = root.after(1000, tick)
 
-            # Start the 5-second tick
-            root.after(1000, tick)
-        else:
-            # First-time users see a manual prompt message instead
-            status_label = ctk.CTkLabel(root, text="Configure your options and click Submit when ready.", 
-                                       font=ctk.CTkFont(size=12))
-            status_label.pack(pady=(10, 0))
+            countdown_after_id = root.after(1000, tick)
+
+        def reset_countdown(*_):
+            if countdown_label is None:
+                return
+            remaining_seconds.set(5)
+            _update_countdown_label()
+
+        def on_auto_submit_toggle(*_):
+            # Persist immediately so next open behaves correctly.
+            _save_json_env('DSG_UI_AUTO_SUBMIT', bool(auto_submit_var.get()))
+            if _can_autosubmit_now():
+                start_countdown()
+            else:
+                stop_countdown()
+
+        # Start countdown on open only when enabled.
+        if _can_autosubmit_now():
+            start_countdown()
+
+        # React to user toggling auto-submit while the UI is open.
+        try:
+            auto_submit_var.trace_add('write', lambda *a: on_auto_submit_toggle())
+        except Exception:
+            pass
 
         # attach traces to all IntVars to reset the countdown if a user interacts
-        all_vars = list(sched_vars.values()) + list(district_vars.values()) + \
+        all_vars = [auto_submit_var] + list(sched_vars.values()) + list(district_vars.values()) + \
                    list(youth_vars.values()) + list(seniors_vars.values()) + \
                    list(opt_vars.values()) + list(full_lang_vars.values()) + \
                    list(se_lang_vars.values()) + list(foreword_lang_vars.values()) + \
@@ -802,8 +860,8 @@ def get_user_selection() -> Dict[str, Any]:
         
         for v in all_vars:
             try:
-                # If it's the first run, we don't need reset_countdown because the timer isn't running
-                if not is_first_run and auto_submit_var.get():
+                # If the timer is active, reset countdown on any interaction.
+                if not is_first_run:
                     v.trace_add('write', lambda *a, v=v: reset_countdown())
             except Exception:
                 pass
@@ -816,14 +874,19 @@ def get_user_selection() -> Dict[str, Any]:
         # Handle window close button (X) same as Cancel
         root.protocol("WM_DELETE_WINDOW", on_cancel)
 
-        # Bottom buttons
+        # Bottom action area (toggle + buttons)
         btn_frame_bottom = ctk.CTkFrame(root, fg_color="transparent")
         btn_frame_bottom.pack(side='bottom', pady=15, padx=10)
-        ctk.CTkButton(btn_frame_bottom, text='Submit', command=on_submit, width=120, height=35).grid(row=0, column=0, padx=8)
+        ctk.CTkCheckBox(
+            btn_frame_bottom,
+            text='Auto submit (5s countdown)',
+            variable=auto_submit_var,
+        ).grid(row=0, column=0, columnspan=3, padx=8, pady=(0, 10))
+        ctk.CTkButton(btn_frame_bottom, text='Submit', command=on_submit, width=120, height=35).grid(row=1, column=0, padx=8)
         ctk.CTkButton(btn_frame_bottom, text='Save', command=on_save, width=120, height=35, 
-                     fg_color="gray40", hover_color="gray50").grid(row=0, column=1, padx=8)
+                     fg_color="gray40", hover_color="gray50").grid(row=1, column=1, padx=8)
         ctk.CTkButton(btn_frame_bottom, text='Cancel', command=on_cancel, width=120, height=35,
-                     fg_color="gray40", hover_color="gray50").grid(row=0, column=2, padx=8)
+                     fg_color="gray40", hover_color="gray50").grid(row=1, column=2, padx=8)
 
         root.mainloop()
 

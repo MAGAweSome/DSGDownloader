@@ -39,6 +39,9 @@ def create_google_event(date_str, location_str, title=None):
         # Get our connection to Google
         service = get_calendar_service()
         
+        # Fetch search_name from env (default to 'Scheduled Service' if missing)
+        name = os.getenv("SEARCH_NAME", "Scheduled Service")
+
         # 1. Figure out the Year and Time
         now = datetime.now()
         year = now.year
@@ -60,7 +63,7 @@ def create_google_event(date_str, location_str, title=None):
         duration = float(os.getenv("SERVICE_DURATION_HOURS", 1.5))
         reminder_min = int(os.getenv("REMINDER_MINUTES", 1440))
         
-        # Attach the correct timezone (Toronto) to the time
+        # Attach the correct timezone to the time
         local_tz = pytz.timezone(tz_name)
         start_dt = local_tz.localize(start_dt)
         # Calculate when the service ends (e.g., 1.5 hours after it starts)
@@ -69,7 +72,7 @@ def create_google_event(date_str, location_str, title=None):
         # 2. Get the City Name and set the Event Title
         city_name = re.split(r'\b(?:Sun|Wed|Mon|Tue|Thu|Fri|Sat)\b', location_str)[0].strip()
         if title is None:
-            title = f"Scheduled in {city_name}"
+            title = f"{name} | Scheduled in {city_name}"
 
         # 3. Check for Duplicates (So we don't add the same service twice)
         # Search a 5-minute window around the start time
@@ -95,7 +98,7 @@ def create_google_event(date_str, location_str, title=None):
         event_body = {
             'summary': title,
             'location': city_name,
-            'description': f'Scheduled service at {city_name}',
+            'description': f"{name} | Scheduled in {city_name}",
             'start': {
                 'dateTime': start_dt.isoformat(),
                 'timeZone': tz_name,

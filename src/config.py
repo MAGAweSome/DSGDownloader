@@ -44,3 +44,6 @@ SKIP_WEBDRIVER_MANAGER = str(_skip_raw).strip().lower() in ("1", "true", "yes")
 # Credentials: prefer values from project .env over OS environment
 USERNAME = _env_vals.get("USERNAME") if _env_vals.get("USERNAME") is not None else os.getenv("USERNAME", "")
 PASSWORD = _env_vals.get("PASSWORD") if _env_vals.get("PASSWORD") is not None else os.getenv("PASSWORD", "")
+
+# UI Configuration
+USE_UI = os.getenv("USE_UI", "false").strip().lower() in ("true", "1", "t", "yes")

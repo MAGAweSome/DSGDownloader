@@ -26,6 +26,7 @@ from src.config import (
     PASSWORD,
     MINIHQ_LINK_SELECTOR,
     MINIHQ_LINK_SELECTOR_TYPE,
+    USE_UI,
 )
 from src.ui import get_user_selection
 from src.browser import init_driver
@@ -59,6 +60,12 @@ def main():
             socket.getaddrinfo(host, None)
         except socket.gaierror:
             print(f"DNS resolution failed for host: {host} - continuing to try opening the URL anyway.")
+
+    # Show prompt state and retrieve choices (GUI or Terminal CLI)
+    if USE_UI:
+        print("Launching User Interface...")
+    else:
+        print("USE_UI is set to false. Running in Terminal CLI mode...")
 
     # Ask user what to extract before starting browser
     user_choices = get_user_selection()
@@ -305,8 +312,6 @@ def main():
                         if href:
                             schedule_months.append({'text': text, 'href': href})
 
-                    # We only want December 2025 and January 2026 as requested
-                    wanted = {'December 2025', 'January 2026'}
                     from urllib.parse import urljoin
 
                     # schedule selection filters from UI
@@ -314,8 +319,6 @@ def main():
                     schedules_sub = user_choices.get('schedules_sub') or {}
 
                     for sm in schedule_months:
-                        if sm['text'] not in wanted:
-                            continue
                         print(f"Processing Schedules month: {sm['text']}")
                         full = urljoin(URL, sm['href'])
                         try:

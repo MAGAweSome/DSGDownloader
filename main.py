@@ -49,6 +49,7 @@ from urllib.parse import urlparse
 from selenium.common.exceptions import WebDriverException
 import time
 import os
+import subprocess
 import json
 from src.pdf_tools.highlighter import highlight_names_in_pdf
 

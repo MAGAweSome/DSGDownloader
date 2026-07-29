@@ -36,6 +36,9 @@ MINIHQ_LINK_SELECTOR_TYPE = os.getenv("MINIHQ_LINK_SELECTOR_TYPE", "css")
 # Local folder for saving DSGs
 DSGS_DIR = os.getenv("DSGS_DIR", r"C:\Users\Marcus\OneDrive\Documents\Church\DSGs")
 
+# Rclone target path on OneDrive
+ONEDRIVE_REMOTE = os.getenv("ONEDRIVE_REMOTE", "onedrive-dsg-downloader:Documents/Church/DSGs")
+
 # Edge driver configuration
 EDGE_DRIVER_PATH = os.getenv("EDGE_DRIVER_PATH", "")
 _skip_raw = os.getenv("SKIP_WEBDRIVER_MANAGER", "false")

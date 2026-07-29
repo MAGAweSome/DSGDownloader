@@ -52,6 +52,18 @@ import os
 import json
 from src.pdf_tools.highlighter import highlight_names_in_pdf
 
+def sync_to_onedrive():
+    """Uploads the local downloaded directory to OneDrive via Rclone."""
+    print(f"\n--- Uploading scraped files from '{DSGS_DIR}' to OneDrive ---")
+    try:
+        subprocess.run(
+            ["rclone", "copy", DSGS_DIR, ONEDRIVE_REMOTE, "--progress"],
+            check=True
+        )
+        print("Successfully synced files to OneDrive!")
+    except Exception as e:
+        print(f"Failed to sync to OneDrive: {e}")
+
 def main():
     # Try a DNS lookup but continue even if it fails — user requested a simple open-wait-close test
     host = urlparse(URL).hostname
@@ -160,7 +172,7 @@ def main():
 
         # List local DSG files from configured folder and ensure year/month/subfolders exist
         try:
-            from src.config import DSGS_DIR
+            from src.config import DSGS_DIR, ONEDRIVE_REMOTE
             local_files = list_files_in_dir(DSGS_DIR, "*")
             print(f"Files in {DSGS_DIR}:")
             if local_files:
@@ -433,6 +445,9 @@ def main():
                     print(f"Error during highlighting process: {e}")
             else:
                 print("No minister colors defined in UI. Skipping highlighting.")
+
+        # FINAL STEP: Upload scraped files to OneDrive
+        sync_to_onedrive()
 
 if __name__ == "__main__":
     main()

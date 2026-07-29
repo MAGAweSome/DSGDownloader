@@ -54,7 +54,14 @@ from src.pdf_tools.highlighter import highlight_names_in_pdf
 
 def sync_to_onedrive():
     """Uploads the local downloaded directory to OneDrive via Rclone."""
+    from src.config import DSGS_DIR, ONEDRIVE_REMOTE
+
     print(f"\n--- Uploading scraped files from '{DSGS_DIR}' to OneDrive ---")
+    
+    if not os.path.exists(DSGS_DIR):
+        print(f"Warning: Local directory '{DSGS_DIR}' does not exist yet. Skipping upload.")
+        return
+
     try:
         subprocess.run(
             ["rclone", "copy", DSGS_DIR, ONEDRIVE_REMOTE, "--progress"],
